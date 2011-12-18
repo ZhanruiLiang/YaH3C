@@ -35,13 +35,15 @@ class EAPAuth:
         self.mac_addr = self.client.getsockname()[4]
         self.ethernet_header = get_ethernet_header(self.mac_addr, PAE_GROUP_ADDR, ETHERTYPE_PAE)
         self.loaded_plugins = []
-        self.loading_plugin_names = ['notify']
+        self.loading_plugin_names = []
         self.has_sent_logoff = False
         self.login_info = login_info
 
     def load_plugins(self):
         homedir = os.path.expanduser('~'+os.getenv('SUDO_USER')) 
         sys.path.insert(0, homedir + '/.yah3c')
+        import yah3crc
+        self.loading_plugin_names = yah3crc.plugins
         for loading_plugin_name in self.loading_plugin_names:
             loaded_plugin = __import__('plugins.' + loading_plugin_name)
             self.loaded_plugins.append(getattr(loaded_plugin, loading_plugin_name))
