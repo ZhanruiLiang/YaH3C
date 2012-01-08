@@ -4,8 +4,13 @@ all:
 	python setup.py build
 
 install:
-	if [ -f ${prefix} ]; then rm -f ${prefix} && mkdir ${prefix} ; fi
 	python setup.py install 
-	cp -r ./yah3c/plugins ${prefix}
-	cp yah3crc.py ${prefix}/
-	chown ${SUDO_USER} -R ${prefix}
+	if [ -e ${prefix} ];  \
+		then \
+			echo "${prefix} already exist.";\
+		else\
+			mkdir ${prefix}; \
+			cp -r ./yah3c/plugins yah3crc.py -d ${prefix};\
+			chown ${SUDO_USER} -R ${prefix}; \
+		fi
+
