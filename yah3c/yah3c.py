@@ -9,6 +9,7 @@ __version__ = '0.1'
 import os, sys
 import ConfigParser
 import getpass
+from argparse import ArgumentParser
 from socket import *
 
 import eapauth
@@ -21,48 +22,67 @@ def prompt_user_info():
         password_again = getpass.getpass('Input again:: ')
         if password == password_again: break
         else: print 'Password do not match!'
-    dev = raw_input('Decice(eth0 by default): ')
+    dev = raw_input('Device(eth0 by default): ')
     if not dev: dev = 'eth0'
     return name, password, dev
 
-def main():
-    # check for root privilege
-    if not (os.getuid() == 0):
-        print ('亲，要加sudo!')
-        exit(-1)
+def parse_options():
+    opts = []
+    parser = ArgumentParser(prog='yah3c')
+    parser.add_argument('-c', const=True, action='store_const', help='choose a user')
+    parser.add_argument('-a', const=True, action='store_const', help='create a new user')
 
+    return parser, parser.parse_args(sys.argv[1:])
+
+def main():
+    # parse the options from argv
+    ps, opts = parse_options()
+
+    if 'h' in opts or 'help' in opts:
+        ps.print_help()
+        return
+        
+    # check for root privilege
+    # why root?
+    # if not (os.getuid() == 0):
+    #     print ('亲，要加sudo!')
+    #     exit(-1)
+
+    # collect login info
     um = usermanager.UserManager()
     login_info = []
-    if (um.get_user_number() == 0):
+    if um.get_user_number() == 0:
         choice = raw_input('No user conf file found, creat a new one?\n<Y/N>: ')
-        if choice == 'y' or choice == 'Y': 
+        if choice in ('y', 'Y'):
+            um.create_user(prompt_user_info())
+
+    users_info = um.get_users_info()
+    if opts.a:
+        try:
             login_info = prompt_user_info()
             um.create_user(login_info)
-        else: exit(-1)
-    else: 
-        users_info = um.get_users_info()
-
-        print '0. add a new user'
-        for i in range(len(users_info)):
-            print i+1, users_info[i]
+        except ConfigParser.DuplicateSectionError:
+            print 'user already exist!'
+    elif opts.c: 
+        for i, u in enumerate(users_info):
+            print i, u
 
         while True:
             try:
                 choice = int(raw_input('Your choice: '))
+                if choice >= len(users_info):
+                    raise ValueError
             except ValueError:
                 print 'Please input a valid number!'
             else: break;
-        if (choice == 0):
-            try:
-                login_info = prompt_user_info()
-                um.create_user(login_info)
-            except ConfigParser.DuplicateSectionError:
-                print 'user already exist!'
-        else: login_info =  um.get_user_info(choice-1)
 
+        login_info = um.get_user_info(choice)
+    else:
+        login_info = um.get_user_info(0)
+
+    # begin authorize
     yah3c = eapauth.EAPAuth(login_info)
     yah3c.serve_forever()
-
 
 if __name__ == "__main__":
     main()
