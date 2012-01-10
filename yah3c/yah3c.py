@@ -6,11 +6,12 @@
 
 __version__ = '0.1'
 
-import os, sys
+import os, sys, subprocess
 import ConfigParser
 import getpass
 from argparse import ArgumentParser
 from socket import *
+from time import ctime
 
 import eapauth
 import usermanager
@@ -34,6 +35,16 @@ def parse_options():
 
     return parser, parser.parse_args(sys.argv[1:])
 
+def is_single():
+    p = subprocess.Popen('ps -e|grep yah3c', shell=True, stdout=subprocess.PIPE)
+    p.wait()
+    r = p.stdout.readlines()
+    if len(r) > 1:
+        print 'An instance of yah3c is running.'
+        return False
+    else:
+        return True
+
 def main():
     # parse the options from argv
     ps, opts = parse_options()
@@ -43,10 +54,12 @@ def main():
         return
         
     # check for root privilege
-    # why root?
-    # if not (os.getuid() == 0):
-    #     print ('亲，要加sudo!')
-    #     exit(-1)
+    if not (os.getuid() == 0):
+        print ('亲，要加sudo!')
+        exit(-1)
+
+    if not is_single():
+        exit(1);
 
     # collect login info
     um = usermanager.UserManager()
