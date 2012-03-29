@@ -12,7 +12,11 @@ import os
 
 class UserManager:
     def __init__(self):
-        self.users_logging_file_dir = os.path.expanduser('~'+os.getenv('SUDO_USER') + '/.yah3c/users.conf')
+        if os.getenv('SUDO_USER'):
+            self.users_logging_file_dir = '/home/' + os.getenv('SUDO_USER') + '/.yah3c/users.conf'
+        else:
+            self.users_logging_file_dir = os.path.expanduser('~/.yah3c/users.conf')
+
         self.cf = ConfigParser.ConfigParser()
         self.cf.read(self.users_logging_file_dir)
        
