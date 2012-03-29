@@ -8,16 +8,24 @@ and parses received EAP packet
 __all__ = ["EAPAuth"]
 
 from socket import *
+import socket as Socket
 import os, sys, pwd
+from select import select
+from time import sleep
 
 from colorama import Fore, Style, init
 # init() # required in Windows
 from eappacket import *
 
+UseColor = 0
+
 def display_prompt(color, string):
-    prompt = color + Style.BRIGHT + '==> ' + Style.RESET_ALL
-    prompt += Style.BRIGHT + string + Style.RESET_ALL
-    print prompt
+    if UseColor:
+        prompt = color + Style.BRIGHT + '==> ' + Style.RESET_ALL
+        prompt += Style.BRIGHT + string + Style.RESET_ALL
+        print prompt
+    else:
+        print string
 
 def display_packet(packet):
     # print ethernet_header infomation
@@ -28,16 +36,14 @@ def display_packet(packet):
 
 class EAPAuth:
     def __init__(self, login_info):
-        # bind the h3c client to the EAP protocal 
-        self.client = socket(AF_PACKET, SOCK_RAW, htons(ETHERTYPE_PAE))
-        self.client.bind((login_info[2], ETHERTYPE_PAE))
-        # get local ethernet card address
-        self.mac_addr = self.client.getsockname()[4]
-        self.ethernet_header = get_ethernet_header(self.mac_addr, PAE_GROUP_ADDR, ETHERTYPE_PAE)
         self.loaded_plugins = []
         self.loading_plugin_names = []
         self.has_sent_logoff = False
         self.login_info = login_info
+
+        self.retryCount = 0
+        self.maxRetry = 15
+        self.connected = 0
 
     def load_plugins(self):
         homedir = os.path.expanduser('~'+os.getenv('SUDO_USER')) 
@@ -61,6 +67,14 @@ class EAPAuth:
                 exit(0)
 
     def send_start(self):
+        login_info = self.login_info
+        # bind the h3c client to the EAP protocal 
+        self.client = socket(AF_PACKET, SOCK_RAW, htons(ETHERTYPE_PAE))
+        self.client.bind((login_info[2], ETHERTYPE_PAE))
+        # get local ethernet card address
+        self.mac_addr = self.client.getsockname()[4]
+        self.ethernet_header = get_ethernet_header(self.mac_addr, PAE_GROUP_ADDR, ETHERTYPE_PAE)
+
         # invoke plugins 
         self.invoke_plugins('before_auth')
 
@@ -95,8 +109,8 @@ class EAPAuth:
         eap_packet = self.ethernet_header + get_EAPOL(EAPOL_EAPPACKET, get_EAP(EAP_RESPONSE, packet_id, EAP_TYPE_H3C, resp))
         try:
             self.client.send(eap_packet)
-        except socket.error, msg:
-            print "Connection error!"
+        except Socket.error, msg:
+            display_prompt(Fore.RED, "Connection error!")
             exit(-1)
 
     def display_login_message(self, msg):
@@ -117,10 +131,14 @@ class EAPAuth:
             code, id, eap_len = unpack("!BBH", eap_packet[4:8])
             if code == EAP_SUCCESS:
                 display_prompt(Fore.YELLOW, 'Got EAP Success')
+                # set connected mark, this mark should be set to 0 when connection lost
+                self.connected = 1
+                self.retryCount = 0
                 # invoke plugins 
                 self.invoke_plugins('after_auth_succ')
                 daemonize('/dev/null','/tmp/daemon.log','/tmp/daemon.log')
             elif code == EAP_FAILURE:
+                self.connected = 0
                 if (self.has_sent_logoff):
                     display_prompt(Fore.YELLOW, 'Logoff Successfully!')
                     # invoke plugins 
@@ -154,22 +172,47 @@ class EAPAuth:
         else:
             display_prompt(Fore.YELLOW, 'Got unknown EAPOL type %i' % type)
 
-    def serve_forever(self):
+    def connect(self):
         try:
-            #print self.login_info
-            self.load_plugins()
             self.send_start()
             while 1:
-                try:
+                display_prompt(Fore.BLUE, "Waiting for reply...")
+                if self.connected:
+                    timeout = 3600 # in second
+                else:
+                    timeout = 3 # in second
+                iReady, oReady, eReady = select([self.client], [], [], timeout)
+                if iReady:
                     eap_packet = self.client.recv(1600)
-                except error , msg:
-                    print "Connection error!"
-                    exit(-1)
-                # strip the ethernet_header and handle
-                self.EAP_handler(eap_packet[14:])
+                    # strip the ethernet_header and handle
+                    self.EAP_handler(eap_packet[14:])
+                else:
+                    print >> sys.stderr, "Connection lost."
+                    return 0
+        except Socket.error as e:
+            print >> sys.stderr, e
+            print >> sys.stderr, "Connection error!"
+            # return 0 means connect failed
+            return 0
         except KeyboardInterrupt:
-            print Fore.RED + Style.BRIGHT + 'Interrupted by user' + Style.RESET_ALL
-            self.send_logoff()
+            # print Fore.RED + Style.BRIGHT + 'Interrupted by user' + Style.RESET_ALL
+            display_prompt('Interrupted by user')
+            return 1
+        return 1
+
+    def serve_forever(self):
+        #print self.login_info
+        self.load_plugins()
+        while self.retryCount < self.maxRetry:
+            result = self.connect()
+            if result: break
+            else:
+                self.connected = 0
+                self.retryCount += 1
+                print 'Retry times: %d/%d, will reconnect after %d seconds.' % (
+                        self.retryCount, self.maxRetry, 3)
+                sleep(3)
+        self.send_logoff()
 
 def daemonize (stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
 
